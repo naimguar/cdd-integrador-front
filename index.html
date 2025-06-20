@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codificación de Datos - Huffman y Shannon-Fano</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .tree-container {
+            overflow-x: auto;
+            min-height: 300px;
+        }
+        .node {
+            display: inline-block;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px 10px;
+            margin: 5px;
+            background-color: #f8f9fa;
+        }
+        .node-connection {
+            position: relative;
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin: 0 5px;
+        }
+        .node-connection::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background-color: #333;
+        }
+        .bit-label {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Codificación de Datos</h1>
+            <p class="text-lg text-gray-600">Compresión con algoritmos de Huffman y Shannon-Fano</p>
+        </header>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Entrada de Datos</h2>
+            
+            <div class="mb-4">
+                <label for="textInput" class="block text-gray-700 mb-2">Texto a codificar:</label>
+                <textarea id="textInput" rows="5" class="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ingrese el texto que desea codificar..."></textarea>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 mb-2">O cargue un archivo de texto:</label>
+                <input type="file" id="fileInput" accept=".txt" class="block w-full text-gray-700 border border-gray-300 rounded-md p-2">
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-gray-700 mb-2">Imagen en blanco y negro (opcional):</label>
+                <input type="file" id="imageInput" accept="image/*" class="block w-full text-gray-700 border border-gray-300 rounded-md p-2">
+                <canvas id="imageCanvas" class="mt-4 border border-gray-300 hidden"></canvas>
+            </div>
+            
+            <div class="flex justify-center">
+                <button id="processBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-md transition duration-300">Procesar</button>
+            </div>
+        </div>
+
+        <div id="resultsContainer" class="hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">Frecuencia de Símbolos</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white">
+                        <thead>
+                            <tr>
+                                <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Símbolo</th>
+                                <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Frecuencia</th>
+                                <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Probabilidad</th>
+                                <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Código Huffman</th>
+                                <th class="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Código Shannon-Fano</th>
+                            </tr>
+                        </thead>
+                        <tbody id="frequencyTableBody">
+                            <!-- Datos generados dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold mb-4">Árbol de Huffman</h2>
+                    <div id="huffmanTree" class="tree-container"></div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold mb-4">Árbol de Shannon-Fano</h2>
+                    <div id="shannonFanoTree" class="tree-container"></div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">Resultados de Codificación</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <h3 class="font-medium text-lg mb-2">Huffman</h3>
+                        <div class="bg-gray-100 p-4 rounded-md">
+                            <p><span class="font-semibold">Texto codificado:</span> <span id="huffmanEncoded" class="break-all text-sm"></span></p>
+                            <p class="mt-2"><span class="font-semibold">Longitud original:</span> <span id="huffmanOriginalLength"></span> bits</p>
+                            <p><span class="font-semibold">Longitud comprimida:</span> <span id="huffmanCompressedLength"></span> bits</p>
+                            <p><span class="font-semibold">Tasa de compresión:</span> <span id="huffmanCompressionRatio"></span></p>
+                            <p><span class="font-semibold">Longitud promedio:</span> <span id="huffmanAverageLength"></span> bits/símbolo</p>
+                            <p><span class="font-semibold">Eficiencia:</span> <span id="huffmanEfficiency"></span>%</p>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h3 class="font-medium text-lg mb-2">Shannon-Fano</h3>
+                        <div class="bg-gray-100 p-4 rounded-md">
+                            <p><span class="font-semibold">Texto codificado:</span> <span id="shannonFanoEncoded" class="break-all text-sm"></span></p>
+                            <p class="mt-2"><span class="font-semibold">Longitud original:</span> <span id="shannonFanoOriginalLength"></span> bits</p>
+                            <p><span class="font-semibold">Longitud comprimida:</span> <span id="shannonFanoCompressedLength"></span> bits</p>
+                            <p><span class="font-semibold">Tasa de compresión:</span> <span id="shannonFanoCompressionRatio"></span></p>
+                            <p><span class="font-semibold">Longitud promedio:</span> <span id="shannonFanoAverageLength"></span> bits/símbolo</p>
+                            <p><span class="font-semibold">Eficiencia:</span> <span id="shannonFanoEfficiency"></span>%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h3 class="font-medium text-lg mb-2">Comparación de Algoritmos</h3>
+                    <div class="h-80">
+                        <canvas id="comparisonChart"></canvas>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 class="font-medium text-lg mb-2">Decodificación</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="decodingInput" class="block text-gray-700 mb-2">Texto codificado (bits):</label>
+                            <textarea id="decodingInput" rows="3" class="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ingrese el texto codificado en bits..."></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 mb-2">Algoritmo:</label>
+                            <select id="decodingAlgorithm" class="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="huffman">Huffman</option>
+                                <option value="shannonFano">Shannon-Fano</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex justify-center">
+                        <button id="decodeBtn" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-md transition duration-300">Decodificar</button>
+                    </div>
+                    <div id="decodedResult" class="mt-4 p-4 bg-gray-100 rounded-md hidden">
+                        <h4 class="font-medium mb-2">Resultado decodificado:</h4>
+                        <p id="decodedText"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="imageCompressionResults" class="bg-white rounded-lg shadow-md p-6 mb-8 hidden">
+                <h2 class="text-xl font-semibold mb-4">Compresión de Imagen</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="font-medium text-lg mb-2">Imagen Original</h3>
+                        <div id="originalImageContainer" class="border border-gray-300 p-2"></div>
+                        <p class="mt-2"><span class="font-semibold">Tamaño original:</span> <span id="originalImageSize"></span> bytes</p>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-lg mb-2">Imagen Comprimida</h3>
+                        <div id="compressedImageInfo" class="border border-gray-300 p-4">
+                            <p><span class="font-semibold">Tamaño comprimido:</span> <span id="compressedImageSize"></span> bytes</p>
+                            <p><span class="font-semibold">Tasa de compresión:</span> <span id="imageCompressionRatio"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
