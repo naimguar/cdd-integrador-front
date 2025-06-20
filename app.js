@@ -1,8 +1,6 @@
 // Elementos del DOM
 const textInput = document.getElementById('textInput');
 const fileInput = document.getElementById('fileInput');
-const imageInput = document.getElementById('imageInput');
-const imageCanvas = document.getElementById('imageCanvas');
 const processBtn = document.getElementById('processBtn');
 const resultsContainer = document.getElementById('resultsContainer');
 const frequencyTableBody = document.getElementById('frequencyTableBody');
@@ -12,18 +10,15 @@ const decodeBtn = document.getElementById('decodeBtn');
 const decodingAlgorithm = document.getElementById('decodingAlgorithm');
 const decodedResult = document.getElementById('decodedResult');
 const decodedText = document.getElementById('decodedText');
-const imageCompressionResults = document.getElementById('imageCompressionResults');
 
 // Variables globales para almacenar los códigos generados
 let huffmanCodes = {};
 let shannonFanoCodes = {};
 let frequencyData = [];
 let originalText = '';
-let imageData = null;
 
 // Event Listeners
 fileInput.addEventListener('change', handleFileUpload);
-imageInput.addEventListener('change', handleImageUpload);
 processBtn.addEventListener('click', processData);
 decodeBtn.addEventListener('click', decodeText);
 
@@ -39,53 +34,11 @@ function handleFileUpload(event) {
     reader.readAsText(file);
 }
 
-// Función para manejar la carga de imágenes
-function handleImageUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const img = new Image();
-        img.onload = function() {
-            // Mostrar el canvas y configurar su tamaño
-            imageCanvas.classList.remove('hidden');
-            const ctx = imageCanvas.getContext('2d');
-            
-            // Ajustar el tamaño del canvas al de la imagen
-            imageCanvas.width = img.width;
-            imageCanvas.height = img.height;
-            
-            // Dibujar la imagen en el canvas
-            ctx.drawImage(img, 0, 0);
-            
-            // Convertir a blanco y negro
-            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
-            const data = imageData.data;
-            
-            for (let i = 0; i < data.length; i += 4) {
-                // Convertir a escala de grises primero
-                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                // Umbral para convertir a blanco y negro (0 o 255)
-                const bw = avg > 128 ? 255 : 0;
-                data[i] = data[i + 1] = data[i + 2] = bw;
-            }
-            
-            ctx.putImageData(imageData, 0, 0);
-            
-            // Guardar los datos de la imagen para procesamiento posterior
-            window.imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
-        };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-}
-
 // Función principal para procesar los datos
 async function processData() {
     originalText = textInput.value;
-    if (!originalText && !window.imageData) {
-        alert('Por favor, ingrese texto o cargue una imagen para procesar.');
+    if (!originalText) {
+        alert('Por favor, ingrese texto o cargue un archivo de texto para procesar.');
         return;
     }
 
@@ -163,11 +116,6 @@ async function processData() {
             alert('Error al comprimir el texto: ' + err.message);
             return;
         }
-    }
-
-    // Procesar imagen si está disponible
-    if (window.imageData) {
-        processImageCompression();
     }
 
     // Mostrar resultados
@@ -725,93 +673,6 @@ function createComparisonChart() {
             }
         }
     });
-}
-
-// Procesar compresión de imagen
-function processImageCompression() {
-    if (!window.imageData) return;
-    
-    const imageData = window.imageData;
-    const data = imageData.data;
-    const width = imageData.width;
-    const height = imageData.height;
-    
-    // Convertir datos de imagen a una cadena binaria (0s y 1s)
-    let binaryString = '';
-    for (let i = 0; i < data.length; i += 4) {
-        // Solo necesitamos un canal ya que es blanco y negro
-        binaryString += data[i] === 0 ? '0' : '1';
-    }
-    
-    // Calcular frecuencias de secuencias de bits
-    const runLengths = [];
-    let currentRun = 1;
-    let currentBit = binaryString[0];
-    
-    for (let i = 1; i < binaryString.length; i++) {
-        if (binaryString[i] === currentBit) {
-            currentRun++;
-        } else {
-            runLengths.push({ bit: currentBit, length: currentRun });
-            currentBit = binaryString[i];
-            currentRun = 1;
-        }
-    }
-    
-    // Añadir la última secuencia
-    runLengths.push({ bit: currentBit, length: currentRun });
-    
-    // Codificar usando Huffman
-    const runFrequencies = {};
-    for (const run of runLengths) {
-        const key = run.bit + run.length;
-        runFrequencies[key] = (runFrequencies[key] || 0) + 1;
-    }
-    const runFreqArray = Object.keys(runFrequencies).map(key => ({
-        symbol: key,
-        frequency: runFrequencies[key],
-        probability: runFrequencies[key] / runLengths.length
-    }));
-    runFreqArray.sort((a, b) => b.frequency - a.frequency);
-    
-    // Construir árbol Huffman para la imagen
-    const imageHuffmanTree = buildHuffmanTree(runFreqArray);
-    const imageHuffmanCodes = {};
-    generateImageHuffmanCodes(imageHuffmanTree, '', imageHuffmanCodes);
-    
-    // Codificar la imagen
-    let encodedImage = '';
-    for (const run of runLengths) {
-        const key = run.bit + run.length;
-        encodedImage += imageHuffmanCodes[key];
-    }
-    
-    // Calcular tamaños y tasa de compresión
-    const originalSize = binaryString.length / 8; // bytes
-    const compressedSize = (encodedImage.length + Object.keys(imageHuffmanCodes).length * 16) / 8; // bytes (incluyendo diccionario)
-    const compressionRatio = (originalSize / compressedSize).toFixed(2);
-    
-    // Mostrar resultados
-    imageCompressionResults.classList.remove('hidden');
-    
-    // Mostrar imagen original
-    const originalImageContainer = document.getElementById('originalImageContainer');
-    originalImageContainer.innerHTML = '';
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    canvas.style.maxWidth = '100%';
-    
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
-    
-    originalImageContainer.appendChild(canvas);
-    
-    // Mostrar información de compresión
-    document.getElementById('originalImageSize').textContent = originalSize;
-    document.getElementById('compressedImageSize').textContent = compressedSize;
-    document.getElementById('imageCompressionRatio').textContent = compressionRatio + ':1';
 }
 
 // Generar códigos Huffman para la compresión de imagen
