@@ -9,7 +9,6 @@ const frequencyTableBody = document.getElementById('frequencyTableBody');
 const huffmanTree = document.getElementById('huffmanTree');
 const shannonFanoTree = document.getElementById('shannonFanoTree');
 const decodeBtn = document.getElementById('decodeBtn');
-const decodingInput = document.getElementById('decodingInput');
 const decodingAlgorithm = document.getElementById('decodingAlgorithm');
 const decodedResult = document.getElementById('decodedResult');
 const decodedText = document.getElementById('decodedText');
@@ -100,20 +99,66 @@ async function processData() {
                 body: JSON.stringify({ text: originalText })
             });
             if (!response.ok) throw new Error('Error en la compresión');
-            const data = await response.json();
-            // Asumimos que la respuesta contiene: frequencyData, huffmanCodes, shannonFanoCodes, huffmanEncoded, shannonFanoEncoded
-            frequencyData = data.frequencyData;
-            huffmanCodes = data.huffmanCodes;
-            shannonFanoCodes = data.shannonFanoCodes;
+            
+            const responseData = await response.json();
+            const huffmanData = responseData.data.huffman;
+            const shannonFanoData = responseData.data.shannon_fano;
+
+            // Asignar datos globales (para la tabla y el gráfico)
+            huffmanCodes = huffmanData.codes;
+            shannonFanoCodes = shannonFanoData.codes;
+
+            // Disparar la descarga del archivo .json y mostrar un enlace de respaldo
+            const downloadUrl = responseData.download_url;
+            const downloadLinkContainer = document.getElementById('downloadLinkContainer');
+            downloadLinkContainer.innerHTML = '';
+            if (downloadUrl) {
+                const fullUrl = `http://127.0.0.1:8000${downloadUrl}`;
+                const filename = downloadUrl.split('/').pop();
+
+                // Crear un enlace temporal para la descarga automática
+                const autoLink = document.createElement('a');
+                autoLink.href = fullUrl;
+                autoLink.setAttribute('download', filename);
+                document.body.appendChild(autoLink);
+                autoLink.click();
+                document.body.removeChild(autoLink);
+
+                // Mostrar un enlace de respaldo por si la descarga automática falla
+                const manualLink = document.createElement('a');
+                manualLink.href = fullUrl;
+                manualLink.textContent = `Descargar ${filename}`;
+                manualLink.className = 'text-blue-600 hover:underline';
+                manualLink.setAttribute('download', filename);
+                
+                const helpText = document.createElement('p');
+                helpText.textContent = 'La descarga del archivo .json ha comenzado. Si no, puede descargarlo manualmente: ';
+                helpText.appendChild(manualLink);
+                downloadLinkContainer.appendChild(helpText);
+            }
+
+            // Preparar datos de frecuencia para la tabla y gráficos
+            const symbolsTable = huffmanData.metrics.symbols_table;
+            const totalFreq = symbolsTable.reduce((sum, item) => sum + item.frequency, 0);
+            frequencyData = symbolsTable.map(item => ({
+                symbol: item.char,
+                frequency: item.frequency,
+                probability: totalFreq > 0 ? item.frequency / totalFreq : 0
+            }));
+            
             // Actualizar la tabla de frecuencias con los códigos
             updateFrequencyTable();
+            
             // Visualizar árboles
-            visualizeHuffmanTree(data.huffmanTree); // Puede requerir adaptar el formato del árbol
-            visualizeShannonFanoTree(frequencyData);
+            // visualizeHuffmanTree(huffmanData.tree); 
+            // visualizeShannonFanoTree(frequencyData); // Shannon-Fano visualization still uses frequency data array
+            
             // Mostrar resultados
-            displayEncodingResults(data.huffmanEncoded, data.shannonFanoEncoded);
+            displayEncodingResults(huffmanData.encoded_data, shannonFanoData.encoded_data, huffmanData.metrics, shannonFanoData.metrics);
+            
             // Crear gráficos comparativos
             createComparisonChart();
+
         } catch (err) {
             alert('Error al comprimir el texto: ' + err.message);
             return;
@@ -152,7 +197,7 @@ function calculateFrequencies(text) {
 
 // Construir el árbol de Huffman
 function buildHuffmanTree(freqData) {
-    // Crear nodos hoja para cada símbolo
+    // 1. Crear una lista de nodos hoja, uno para cada símbolo con su frecuencia.
     const nodes = freqData.map(item => ({
         symbol: item.symbol,
         frequency: item.frequency,
@@ -160,86 +205,89 @@ function buildHuffmanTree(freqData) {
         right: null
     }));
     
-    // Construir el árbol combinando nodos
+    // 2. Construir el árbol combinando los dos nodos de menor frecuencia hasta que solo quede uno (la raíz).
     while (nodes.length > 1) {
-        // Ordenar nodos por frecuencia
+        // Ordenar nodos por frecuencia de menor a mayor.
         nodes.sort((a, b) => a.frequency - b.frequency);
         
-        // Tomar los dos nodos con menor frecuencia
+        // Extraer los dos nodos con las frecuencias más bajas.
         const left = nodes.shift();
         const right = nodes.shift();
         
-        // Crear un nuevo nodo interno
+        // Crear un nuevo nodo interno que es padre de los dos nodos extraídos.
+        // La frecuencia del nuevo nodo es la suma de las frecuencias de sus hijos.
         const newNode = {
-            symbol: left.symbol + right.symbol,
+            symbol: left.symbol + right.symbol, // El símbolo es una concatenación (útil para depuración).
             frequency: left.frequency + right.frequency,
             left: left,
             right: right
         };
         
-        // Añadir el nuevo nodo a la lista
+        // Añadir el nuevo nodo a la lista.
         nodes.push(newNode);
     }
     
-    // Devolver la raíz del árbol
+    // 3. Devolver el único nodo que queda, que es la raíz del árbol de Huffman.
     return nodes[0];
 }
 
-// Generar códigos Huffman recorriendo el árbol
+// Generar códigos Huffman recorriendo el árbol de forma recursiva.
 function generateHuffmanCodes(node, code) {
-    if (!node) return;
+    if (!node) return; // Condición de parada: si el nodo es nulo.
     
-    // Si es un nodo hoja (un solo carácter), asignar el código
+    // Si es un nodo hoja (tiene un símbolo de un solo carácter), se le asigna el código binario acumulado.
     if (!node.left && !node.right && node.symbol.length === 1) {
         huffmanCodes[node.symbol] = code;
         return;
     }
     
-    // Recorrer subárbol izquierdo (añadir 0)
+    // Para los nodos internos, se recorre recursivamente hacia la izquierda (añadiendo '0' al código)
+    // y hacia la derecha (añadiendo '1' al código).
     generateHuffmanCodes(node.left, code + '0');
-    
-    // Recorrer subárbol derecho (añadir 1)
     generateHuffmanCodes(node.right, code + '1');
 }
 
-// Generar códigos Shannon-Fano
+// Generar códigos Shannon-Fano de forma recursiva.
 function generateShannonFanoCodes(freqData, start, end, code) {
-    // Caso base: un solo símbolo
+    // Caso base: si solo hay un símbolo en el grupo, se le asigna el código actual.
     if (start === end) {
         shannonFanoCodes[freqData[start].symbol] = code;
         return;
     }
     
-    // Caso base: dos símbolos
+    // Caso especial: si hay dos símbolos, se asigna '0' al primero y '1' al segundo.
     if (start + 1 === end) {
         shannonFanoCodes[freqData[start].symbol] = code + '0';
         shannonFanoCodes[freqData[end].symbol] = code + '1';
         return;
     }
     
-    // Encontrar el punto de división que equilibra las frecuencias
+    // Encontrar el punto de división que mejor equilibra las sumas de frecuencias.
     const splitIndex = findSplitIndex(freqData, start, end);
     
-    // Generar códigos para cada mitad
+    // Llamar recursivamente para la primera mitad (añadiendo '0' al código).
     generateShannonFanoCodes(freqData, start, splitIndex, code + '0');
+    // Llamar recursivamente para la segunda mitad (añadiendo '1' al código).
     generateShannonFanoCodes(freqData, splitIndex + 1, end, code + '1');
 }
 
-// Encontrar el índice para dividir el array en Shannon-Fano
+// Encontrar el índice para dividir el array en Shannon-Fano.
+// El objetivo es que la suma de frecuencias de ambos grupos sea lo más parecida posible.
 function findSplitIndex(freqData, start, end) {
-    // Calcular suma total de frecuencias
+    // Calcular la suma total de frecuencias en el rango actual.
     let totalFreq = 0;
     for (let i = start; i <= end; i++) {
         totalFreq += freqData[i].frequency;
     }
     
-    // Encontrar el punto donde la diferencia entre las sumas es mínima
+    // Encontrar el punto donde la diferencia acumulada con la mitad del total sea mínima.
     let currentSum = 0;
     let bestDiff = totalFreq;
     let splitIndex = start;
     
     for (let i = start; i < end; i++) {
         currentSum += freqData[i].frequency;
+        // La diferencia se calcula como |total - 2 * suma_actual|, que es equivalente a |(total - suma_actual) - suma_actual|.
         const diff = Math.abs(totalFreq - 2 * currentSum);
         
         if (diff < bestDiff) {
@@ -254,16 +302,14 @@ function findSplitIndex(freqData, start, end) {
 // Actualizar la tabla de frecuencias con los códigos generados
 function updateFrequencyTable() {
     frequencyTableBody.innerHTML = '';
-    
+    if (!Array.isArray(frequencyData)) return;
     frequencyData.forEach(item => {
         const row = document.createElement('tr');
-        
         // Formatear el símbolo para mostrar espacios y saltos de línea
         let displaySymbol = item.symbol;
         if (displaySymbol === ' ') displaySymbol = '␣';
         if (displaySymbol === '\n') displaySymbol = '↵';
         if (displaySymbol === '\t') displaySymbol = '→';
-        
         row.innerHTML = `
             <td class="py-2 px-4 border-b border-gray-200">${displaySymbol}</td>
             <td class="py-2 px-4 border-b border-gray-200">${item.frequency}</td>
@@ -271,192 +317,206 @@ function updateFrequencyTable() {
             <td class="py-2 px-4 border-b border-gray-200">${huffmanCodes[item.symbol] || '-'}</td>
             <td class="py-2 px-4 border-b border-gray-200">${shannonFanoCodes[item.symbol] || '-'}</td>
         `;
-        
         frequencyTableBody.appendChild(row);
     });
 }
 
-// Visualizar el árbol de Huffman
-function visualizeHuffmanTree(root) {
-    huffmanTree.innerHTML = '';
+// Visualizar el árbol de Huffman en el DOM.
+// function visualizeHuffmanTree(root) {
+//     huffmanTree.innerHTML = ''; // Limpiar visualización anterior.
     
-    if (!root) return;
+//     if (!root) return; // No hacer nada si no hay árbol.
     
-    // Crear representación visual simplificada del árbol
-    const treeDiv = document.createElement('div');
-    treeDiv.className = 'flex flex-col items-center';
+//     // Crear el contenedor principal para el árbol.
+//     const treeDiv = document.createElement('div');
+//     treeDiv.className = 'flex flex-col items-center';
     
-    function createNodeElement(node, level, path) {
-        if (!node) return null;
-        
-        const nodeDiv = document.createElement('div');
-        nodeDiv.className = 'flex flex-col items-center mb-4';
-        
-        const nodeContent = document.createElement('div');
-        nodeContent.className = 'node';
-        
-        // Formatear el símbolo para mostrar espacios y saltos de línea
-        let displaySymbol = node.symbol;
-        if (displaySymbol === ' ') displaySymbol = '␣';
-        if (displaySymbol === '\n') displaySymbol = '↵';
-        if (displaySymbol === '\t') displaySymbol = '→';
-        
-        nodeContent.innerHTML = `
-            <div>${displaySymbol}</div>
-            <div class="text-xs">${node.frequency}</div>
-            ${path ? `<div class="text-xs font-bold">${path}</div>` : ''}
-        `;
-        
-        nodeDiv.appendChild(nodeContent);
-        
-        // Crear contenedor para hijos
-        const childrenDiv = document.createElement('div');
-        childrenDiv.className = 'flex justify-center gap-4';
-        
-        // Crear hijos recursivamente
-        if (node.left || node.right) {
-            if (node.left) {
-                const leftConnection = document.createElement('div');
-                leftConnection.className = 'node-connection';
-                
-                const bitLabel = document.createElement('div');
-                bitLabel.className = 'bit-label';
-                bitLabel.textContent = '0';
-                leftConnection.appendChild(bitLabel);
-                
-                const leftChild = createNodeElement(node.left, level + 1, path + '0');
-                
-                childrenDiv.appendChild(leftConnection);
-                childrenDiv.appendChild(leftChild);
-            }
-            
-            if (node.right) {
-                const rightConnection = document.createElement('div');
-                rightConnection.className = 'node-connection';
-                
-                const bitLabel = document.createElement('div');
-                bitLabel.className = 'bit-label';
-                bitLabel.textContent = '1';
-                rightConnection.appendChild(bitLabel);
-                
-                const rightChild = createNodeElement(node.right, level + 1, path + '1');
-                
-                childrenDiv.appendChild(rightConnection);
-                childrenDiv.appendChild(rightChild);
-            }
-            
-            nodeDiv.appendChild(childrenDiv);
-        }
-        
-        return nodeDiv;
-    }
-    
-    const rootElement = createNodeElement(root, 0, '');
-    treeDiv.appendChild(rootElement);
-    huffmanTree.appendChild(treeDiv);
-}
+//     // Función recursiva para crear los elementos del DOM para cada nodo del árbol.
+//     function createNodeElement(node, level, path) {
+//         if (!node) return null; // Condición de parada.
 
-// Visualizar el árbol de Shannon-Fano
-function visualizeShannonFanoTree(freqData) {
-    shannonFanoTree.innerHTML = '';
+//         // Crear el div principal para el nodo.
+//         const nodeDiv = document.createElement('div');
+//         nodeDiv.className = 'flex flex-col items-center mb-4';
+        
+//         // Crear el contenido visible del nodo (símbolo y frecuencia/código).
+//         const nodeContent = document.createElement('div');
+//         nodeContent.className = 'node';
+        
+//         // Formatear el símbolo para que sea legible (espacios, saltos de línea, etc.).
+//         // La API devuelve el `char` solo para los nodos hoja.
+//         let displaySymbol = node.char || ' '; // Usar el caracter si es una hoja.
+//         if (displaySymbol === ' ') displaySymbol = '␣';
+//         if (displaySymbol === '\n') displaySymbol = '↵';
+//         if (displaySymbol === '\t') displaySymbol = '→';
+        
+//         // La API devuelve la frecuencia o el código en el campo `frequency` del árbol.
+//         const frequencyOrCode = node.frequency;
+
+//         // Rellenar el contenido del nodo. Los nodos internos se marcan con '⦿'.
+//         nodeContent.innerHTML = `
+//             <div>${node.char ? displaySymbol : '⦿'}</div>
+//             <div class="text-xs">${frequencyOrCode}</div>
+//             ${path ? `<div class="text-xs font-bold">${path}</div>` : ''}
+//         `;
+        
+//         nodeDiv.appendChild(nodeContent);
+        
+//         // Crear el contenedor para los hijos de este nodo.
+//         const childrenDiv = document.createElement('div');
+//         childrenDiv.className = 'flex justify-center gap-4';
+
+//         // Crear los hijos recursivamente si existen.
+//         if (node.left || node.right) {
+//             // Procesar hijo izquierdo.
+//             if (node.left) {
+//                 const leftConnection = document.createElement('div');
+//                 leftConnection.className = 'node-connection';
+                
+//                 const bitLabel = document.createElement('div');
+//                 bitLabel.className = 'bit-label';
+//                 bitLabel.textContent = '0'; // La rama izquierda corresponde al bit '0'.
+//                 leftConnection.appendChild(bitLabel);
+                
+//                 const leftChild = createNodeElement(node.left, level + 1, path + '0');
+                
+//                 if (leftChild) {
+//                     childrenDiv.appendChild(leftConnection);
+//                     childrenDiv.appendChild(leftChild);
+//                 }
+//             }
+            
+//             // Procesar hijo derecho.
+//             if (node.right) {
+//                 const rightConnection = document.createElement('div');
+//                 rightConnection.className = 'node-connection';
+                
+//                 const bitLabel = document.createElement('div');
+//                 bitLabel.className = 'bit-label';
+//                 bitLabel.textContent = '1'; // La rama derecha corresponde al bit '1'.
+//                 rightConnection.appendChild(bitLabel);
+                
+//                 const rightChild = createNodeElement(node.right, level + 1, path + '1');
+                
+//                 if (rightChild) {
+//                     childrenDiv.appendChild(rightConnection);
+//                     childrenDiv.appendChild(rightChild);
+//                 }
+//             }
+            
+//             nodeDiv.appendChild(childrenDiv);
+//         }
+        
+//         return nodeDiv;
+//     }
     
-    // Crear representación visual del árbol Shannon-Fano
-    const treeDiv = document.createElement('div');
-    treeDiv.className = 'flex flex-col items-center';
+//     // Iniciar la creación del árbol desde la raíz.
+//     const rootElement = createNodeElement(root, 0, '');
+//     treeDiv.appendChild(rootElement);
+//     huffmanTree.appendChild(treeDiv);
+// }
+
+// Visualizar el "árbol" de Shannon-Fano (en realidad, el proceso de partición).
+// function visualizeShannonFanoTree(freqData) {
+//     shannonFanoTree.innerHTML = ''; // Limpiar visualización anterior.
     
-    // Función recursiva para visualizar la partición Shannon-Fano
-    function visualizePartition(data, start, end, level, path) {
-        if (start > end) return null;
-        
-        // Caso base: un solo símbolo
-        if (start === end) {
-            const nodeDiv = document.createElement('div');
-            nodeDiv.className = 'node';
-            
-            // Formatear el símbolo para mostrar espacios y saltos de línea
-            let displaySymbol = data[start].symbol;
-            if (displaySymbol === ' ') displaySymbol = '␣';
-            if (displaySymbol === '\n') displaySymbol = '↵';
-            if (displaySymbol === '\t') displaySymbol = '→';
-            
-            nodeDiv.innerHTML = `
-                <div>${displaySymbol}</div>
-                <div class="text-xs">${data[start].frequency}</div>
-                <div class="text-xs font-bold">${path}</div>
-            `;
-            
-            return nodeDiv;
-        }
-        
-        // Encontrar el punto de división
-        const splitIndex = findSplitIndex(data, start, end);
-        
-        // Crear nodo para este nivel
-        const nodeDiv = document.createElement('div');
-        nodeDiv.className = 'flex flex-col items-center mb-4';
-        
-        // Calcular la suma de frecuencias para este grupo
-        let totalFreq = 0;
-        let symbols = '';
-        for (let i = start; i <= end; i++) {
-            totalFreq += data[i].frequency;
-            symbols += data[i].symbol;
-        }
-        
-        const nodeContent = document.createElement('div');
-        nodeContent.className = 'node';
-        nodeContent.innerHTML = `
-            <div>${symbols.length > 10 ? symbols.substring(0, 10) + '...' : symbols}</div>
-            <div class="text-xs">${totalFreq}</div>
-            ${path ? `<div class="text-xs font-bold">${path}</div>` : ''}
-        `;
-        
-        nodeDiv.appendChild(nodeContent);
-        
-        // Crear contenedor para hijos
-        const childrenDiv = document.createElement('div');
-        childrenDiv.className = 'flex justify-center gap-4';
-        
-        // Crear conexiones y subárboles
-        if (start <= splitIndex) {
-            const leftConnection = document.createElement('div');
-            leftConnection.className = 'node-connection';
-            
-            const bitLabel = document.createElement('div');
-            bitLabel.className = 'bit-label';
-            bitLabel.textContent = '0';
-            leftConnection.appendChild(bitLabel);
-            
-            const leftChild = visualizePartition(data, start, splitIndex, level + 1, path + '0');
-            
-            childrenDiv.appendChild(leftConnection);
-            childrenDiv.appendChild(leftChild);
-        }
-        
-        if (splitIndex + 1 <= end) {
-            const rightConnection = document.createElement('div');
-            rightConnection.className = 'node-connection';
-            
-            const bitLabel = document.createElement('div');
-            bitLabel.className = 'bit-label';
-            bitLabel.textContent = '1';
-            rightConnection.appendChild(bitLabel);
-            
-            const rightChild = visualizePartition(data, splitIndex + 1, end, level + 1, path + '1');
-            
-            childrenDiv.appendChild(rightConnection);
-            childrenDiv.appendChild(rightChild);
-        }
-        
-        nodeDiv.appendChild(childrenDiv);
-        return nodeDiv;
-    }
+//     // Crear el contenedor principal.
+//     const treeDiv = document.createElement('div');
+//     treeDiv.className = 'flex flex-col items-center';
     
-    // Iniciar la visualización desde la raíz
-    const rootElement = visualizePartition(freqData, 0, freqData.length - 1, 0, '');
-    treeDiv.appendChild(rootElement);
-    shannonFanoTree.appendChild(treeDiv);
-}
+//     // Función recursiva para visualizar cada partición.
+//     function visualizePartition(data, start, end, level, path) {
+//         if (start > end) return null; // Condición de parada.
+        
+//         // Caso base: si solo hay un símbolo, crear un nodo hoja.
+//         if (start === end) {
+//             const nodeDiv = document.createElement('div');
+//             nodeDiv.className = 'node';
+            
+//             let displaySymbol = data[start].symbol;
+//             if (displaySymbol === ' ') displaySymbol = '␣';
+//             if (displaySymbol === '\n') displaySymbol = '↵';
+//             if (displaySymbol === '\t') displaySymbol = '→';
+            
+//             nodeDiv.innerHTML = `
+//                 <div>${displaySymbol}</div>
+//                 <div class="text-xs">${data[start].frequency}</div>
+//                 <div class="text-xs font-bold">${path}</div>
+//             `;
+            
+//             return nodeDiv;
+//         }
+        
+//         // Encontrar el punto de división para el grupo actual.
+//         const splitIndex = findSplitIndex(data, start, end);
+        
+//         // Crear un nodo para representar el grupo actual de símbolos.
+//         const nodeDiv = document.createElement('div');
+//         nodeDiv.className = 'flex flex-col items-center mb-4';
+        
+//         // Calcular la suma de frecuencias y los símbolos del grupo.
+//         let totalFreq = 0;
+//         let symbols = '';
+//         for (let i = start; i <= end; i++) {
+//             totalFreq += data[i].frequency;
+//             symbols += data[i].symbol;
+//         }
+        
+//         const nodeContent = document.createElement('div');
+//         nodeContent.className = 'node';
+//         nodeContent.innerHTML = `
+//             <div>${symbols.length > 10 ? symbols.substring(0, 10) + '...' : symbols}</div>
+//             <div class="text-xs">${totalFreq}</div>
+//             ${path ? `<div class="text-xs font-bold">${path}</div>` : ''}
+//         `;
+        
+//         nodeDiv.appendChild(nodeContent);
+        
+//         // Crear el contenedor para las dos particiones (hijos).
+//         const childrenDiv = document.createElement('div');
+//         childrenDiv.className = 'flex justify-center gap-4';
+        
+//         // Visualizar recursivamente la primera mitad (rama '0').
+//         if (start <= splitIndex) {
+//             const leftConnection = document.createElement('div');
+//             leftConnection.className = 'node-connection';
+            
+//             const bitLabel = document.createElement('div');
+//             bitLabel.className = 'bit-label';
+//             bitLabel.textContent = '0';
+//             leftConnection.appendChild(bitLabel);
+            
+//             const leftChild = visualizePartition(data, start, splitIndex, level + 1, path + '0');
+            
+//             childrenDiv.appendChild(leftConnection);
+//             childrenDiv.appendChild(leftChild);
+//         }
+        
+//         // Visualizar recursivamente la segunda mitad (rama '1').
+//         if (splitIndex + 1 <= end) {
+//             const rightConnection = document.createElement('div');
+//             rightConnection.className = 'node-connection';
+            
+//             const bitLabel = document.createElement('div');
+//             bitLabel.className = 'bit-label';
+//             bitLabel.textContent = '1';
+//             rightConnection.appendChild(bitLabel);
+            
+//             const rightChild = visualizePartition(data, splitIndex + 1, end, level + 1, path + '1');
+            
+//             childrenDiv.appendChild(rightConnection);
+//             childrenDiv.appendChild(rightChild);
+//         }
+        
+//         nodeDiv.appendChild(childrenDiv);
+//         return nodeDiv;
+//     }
+    
+//     // Iniciar la visualización desde el grupo completo de símbolos.
+//     const rootElement = visualizePartition(freqData, 0, freqData.length - 1, 0, '');
+//     treeDiv.appendChild(rootElement);
+//     shannonFanoTree.appendChild(treeDiv);
+// }
 
 // Codificar texto usando un conjunto de códigos
 function encodeText(text, codes) {
@@ -467,104 +527,93 @@ function encodeText(text, codes) {
     return encoded;
 }
 
-// Decodificar texto
+// Decodificar texto desde un archivo .json
 async function decodeText() {
-    const encodedText = decodingInput.value.trim();
+    const decodingFile = document.getElementById('decodingFile').files[0];
     const algorithm = decodingAlgorithm.value;
-    if (!encodedText) {
-        alert('Por favor, ingrese el texto codificado.');
+
+    if (!decodingFile) {
+        alert('Por favor, seleccione un archivo .json para decodificar.');
         return;
     }
-    let decoded = '';
-    let url = '';
-    if (algorithm === 'huffman') {
-        url = 'http://127.0.0.1:8000/decompress/huffman';
-    } else {
-        url = 'http://127.0.0.1:8000/decompress/shannon_fano';
-    }
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ encoded: encodedText })
-        });
-        if (!response.ok) throw new Error('Error en la descompresión');
-        const data = await response.json();
-        decoded = data.decoded;
-    } catch (err) {
-        alert('Error al decodificar: ' + err.message);
-        return;
-    }
-    // Mostrar resultado
-    decodedText.textContent = decoded;
-    decodedResult.classList.remove('hidden');
+
+    const reader = new FileReader();
+    reader.onload = async function(event) {
+        try {
+            const fileContent = event.target.result;
+            const compressedData = JSON.parse(fileContent);
+
+            let encodedText = '';
+            let codesToUse = {};
+
+            if (algorithm === 'huffman') {
+                if (!compressedData.huffman) throw new Error('El archivo no contiene datos de Huffman.');
+                encodedText = compressedData.huffman.encoded_data;
+                codesToUse = compressedData.huffman.codes;
+            } else { // shannonFano
+                if (!compressedData.shannon_fano) throw new Error('El archivo no contiene datos de Shannon-Fano.');
+                encodedText = compressedData.shannon_fano.encoded_data;
+                codesToUse = compressedData.shannon_fano.codes;
+            }
+
+            let decoded = '';
+            // Corregir el nombre del endpoint para que coincida con la API (shannon_fano)
+            const endpoint = algorithm === 'shannonFano' ? 'shannon_fano' : algorithm;
+            const url = `http://127.0.0.1:8000/decompress/${endpoint}`;
+            
+            const requestBody = {
+                encoded_data: encodedText,
+                codes: codesToUse
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ detail: 'No se pudo leer el error del servidor.' }));
+                throw new Error(`Error en la descompresión: ${JSON.stringify(errorData.detail)}`);
+            }
+
+            const data = await response.json();
+            // La API devuelve la clave `decoded_text` en la respuesta.
+            decoded = data.decoded_text;
+
+            // Mostrar resultado
+            decodedText.textContent = decoded;
+            decodedResult.classList.remove('hidden');
+
+        } catch (err) {
+            alert('Error al procesar el archivo de decodificación: ' + err.message);
+        }
+    };
+
+    reader.readAsText(decodingFile);
 }
 
 // Mostrar resultados de codificación
-function displayEncodingResults(huffmanEncoded, shannonFanoEncoded) {
-    // Calcular métricas para Huffman
-    const originalBits = originalText.length * 8; // Asumiendo 8 bits por carácter ASCII
-    const huffmanBits = huffmanEncoded.length;
-    const huffmanRatio = (originalBits / huffmanBits).toFixed(2);
-    
-    // Calcular longitud promedio de código Huffman
-    let huffmanTotalLength = 0;
-    let totalSymbols = 0;
-    
-    for (const item of frequencyData) {
-        const codeLength = huffmanCodes[item.symbol].length;
-        huffmanTotalLength += item.frequency * codeLength;
-        totalSymbols += item.frequency;
-    }
-    
-    const huffmanAvgLength = (huffmanTotalLength / totalSymbols).toFixed(2);
-    
-    // Calcular entropía para medir eficiencia
-    let entropy = 0;
-    for (const item of frequencyData) {
-        entropy -= item.probability * Math.log2(item.probability);
-    }
-    
-    const huffmanEfficiency = ((entropy / huffmanAvgLength) * 100).toFixed(2);
-    
-    // Calcular métricas para Shannon-Fano
-    const shannonFanoBits = shannonFanoEncoded.length;
-    const shannonFanoRatio = (originalBits / shannonFanoBits).toFixed(2);
-    
-    // Calcular longitud promedio de código Shannon-Fano
-    let shannonFanoTotalLength = 0;
-    
-    for (const item of frequencyData) {
-        const codeLength = shannonFanoCodes[item.symbol].length;
-        shannonFanoTotalLength += item.frequency * codeLength;
-    }
-    
-    const shannonFanoAvgLength = (shannonFanoTotalLength / totalSymbols).toFixed(2);
-    const shannonFanoEfficiency = ((entropy / shannonFanoAvgLength) * 100).toFixed(2);
-    
-    // Mostrar resultados en la interfaz
+function displayEncodingResults(huffmanEncoded, shannonFanoEncoded, huffmanMetrics, shannonFanoMetrics) {
+    // Mostrar resultados de Huffman en la interfaz
     document.getElementById('huffmanEncoded').textContent = huffmanEncoded.length > 100 
         ? huffmanEncoded.substring(0, 100) + '...' 
         : huffmanEncoded;
-    document.getElementById('huffmanOriginalLength').textContent = originalBits;
-    document.getElementById('huffmanCompressedLength').textContent = huffmanBits;
-    document.getElementById('huffmanCompressionRatio').textContent = huffmanRatio + ':1';
-    document.getElementById('huffmanAverageLength').textContent = huffmanAvgLength;
-    document.getElementById('huffmanEfficiency').textContent = huffmanEfficiency;
+    document.getElementById('huffmanOriginalLength').textContent = huffmanMetrics.original_size_bits;
+    document.getElementById('huffmanCompressedLength').textContent = huffmanMetrics.compressed_size_bits;
+    document.getElementById('huffmanCompressionRatio').textContent = huffmanMetrics.compression_ratio.toFixed(2) + ':1';
+    document.getElementById('huffmanAverageLength').textContent = huffmanMetrics.avg_code_length.toFixed(2);
+    document.getElementById('huffmanEfficiency').textContent = (huffmanMetrics.efficiency * 100).toFixed(2);
     
+    // Mostrar resultados de Shannon-Fano en la interfaz
     document.getElementById('shannonFanoEncoded').textContent = shannonFanoEncoded.length > 100 
         ? shannonFanoEncoded.substring(0, 100) + '...' 
         : shannonFanoEncoded;
-    document.getElementById('shannonFanoOriginalLength').textContent = originalBits;
-    document.getElementById('shannonFanoCompressedLength').textContent = shannonFanoBits;
-    document.getElementById('shannonFanoCompressionRatio').textContent = shannonFanoRatio + ':1';
-    document.getElementById('shannonFanoAverageLength').textContent = shannonFanoAvgLength;
-    document.getElementById('shannonFanoEfficiency').textContent = shannonFanoEfficiency;
-    
-    // Preparar datos para decodificación
-    decodingInput.value = huffmanEncoded.length > 100 
-        ? huffmanEncoded.substring(0, 100) 
-        : huffmanEncoded;
+    document.getElementById('shannonFanoOriginalLength').textContent = shannonFanoMetrics.original_size_bits;
+    document.getElementById('shannonFanoCompressedLength').textContent = shannonFanoMetrics.compressed_size_bits;
+    document.getElementById('shannonFanoCompressionRatio').textContent = shannonFanoMetrics.compression_ratio.toFixed(2) + ':1';
+    document.getElementById('shannonFanoAverageLength').textContent = shannonFanoMetrics.avg_code_length.toFixed(2);
+    document.getElementById('shannonFanoEfficiency').textContent = (shannonFanoMetrics.efficiency * 100).toFixed(2);
 }
 
 // Crear gráfico comparativo
@@ -583,8 +632,8 @@ function createComparisonChart() {
     
     const frequencies = frequencyData.map(item => item.frequency);
     
-    const huffmanLengths = frequencyData.map(item => huffmanCodes[item.symbol].length);
-    const shannonFanoLengths = frequencyData.map(item => shannonFanoCodes[item.symbol].length);
+    const huffmanLengths = frequencyData.map(item => huffmanCodes[item.symbol] ? huffmanCodes[item.symbol].length : 0);
+    const shannonFanoLengths = frequencyData.map(item => shannonFanoCodes[item.symbol] ? shannonFanoCodes[item.symbol].length : 0);
     
     // Limitar a los 15 símbolos más frecuentes para mejor visualización
     const maxSymbols = 15;
@@ -718,13 +767,11 @@ function processImageCompression() {
         const key = run.bit + run.length;
         runFrequencies[key] = (runFrequencies[key] || 0) + 1;
     }
-    
     const runFreqArray = Object.keys(runFrequencies).map(key => ({
         symbol: key,
         frequency: runFrequencies[key],
         probability: runFrequencies[key] / runLengths.length
     }));
-    
     runFreqArray.sort((a, b) => b.frequency - a.frequency);
     
     // Construir árbol Huffman para la imagen
