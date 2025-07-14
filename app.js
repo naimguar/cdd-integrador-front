@@ -46,7 +46,7 @@ async function processData() {
     if (originalText) {
         // Llamar a la API para comprimir el texto
         try {
-            const response = await fetch('http://127.0.0.1:8000/compress', {
+            const response = await fetch('https://cdd-integrador.onrender.com/compress', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: originalText })
@@ -66,7 +66,7 @@ async function processData() {
             const downloadLinkContainer = document.getElementById('downloadLinkContainer');
             downloadLinkContainer.innerHTML = '';
             if (downloadUrl) {
-                const fullUrl = `http://127.0.0.1:8000${downloadUrl}`;
+                const fullUrl = `https://cdd-integrador.onrender.com${downloadUrl}`;
                 const filename = downloadUrl.split('/').pop();
 
                 // Crear un enlace temporal para la descarga automática
@@ -507,7 +507,7 @@ async function decodeText() {
             let decoded = '';
             // Corregir el nombre del endpoint para que coincida con la API (shannon_fano)
             const endpoint = algorithm === 'shannonFano' ? 'shannon_fano' : algorithm;
-            const url = `http://127.0.0.1:8000/decompress/${endpoint}`;
+            const url = `https://cdd-integrador.onrender.com/decompress/${endpoint}`;
             
             const requestBody = {
                 encoded_data: encodedText,
